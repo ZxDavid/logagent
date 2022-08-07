@@ -10,11 +10,14 @@ func aaa() {
 
 }
 
+func bbb() {
+	go aaa()
+	fmt.Println("bbb执行结束")
+}
 func main() {
-	for i := 0; i <= 3; i++ {
-		go aaa()
-
-	}
+	bbb()
+	fmt.Println("main执行结束")
 	for {
+
 	}
 }

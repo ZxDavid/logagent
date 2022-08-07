@@ -5,10 +5,7 @@ import (
 	"logagent/etcd"
 	"logagent/kafka"
 	tailfi "logagent/tailfile"
-	"strings"
-	"time"
 
-	"github.com/Shopify/sarama"
 	"github.com/sirupsen/logrus"
 	"gopkg.in/ini.v1"
 )
@@ -41,62 +38,6 @@ type CollectConfig struct {
 type EtcdConfig struct {
 	Address    string `ini:"address"`
 	CollectKey string `ini:"collect_key"`
-}
-
-//真正的业务逻辑
-func run() (err error) {
-	//TailObj -->log -->Client --> kafka
-	for key, ttt := range tailfi.TailObj {
-		go func() {
-			for {
-				//循环读数据
-				line, ok := <-ttt.Lines
-
-				if !ok {
-					logrus.Error("tail file close reopen, filename:%s\n", ttt.Filename)
-					time.Sleep(time.Second)
-					continue
-				}
-				//如果是空行就略过
-				if len(strings.Trim(line.Text, "\r")) == 0 {
-					continue
-				}
-				//利用通道将同步的代码改为异步
-				//把读出来的一行日志包装成kafka里面的msg类型，丢到通道中
-				msg := &sarama.ProducerMessage{}
-				msg.Topic = etcd.EtcdConf[key].Topic
-				msg.Value = sarama.StringEncoder(line.Text)
-				kafka.MsgChan(msg)
-				fmt.Printf("msg:%v\n", msg)
-			}
-		}()
-		if key == 1 {
-			time.Sleep(time.Second * 100)
-		}
-	}
-
-	return
-	// for {
-	// 	//循环读数据
-	// 	line, ok := <-tailfi.TailObj.Lines
-
-	// 	if !ok {
-	// 		logrus.Error("tail file close reopen, filename:%s\n", tailfi.TailObj.Filename)
-	// 		time.Sleep(time.Second)
-	// 		continue
-	// 	}
-	// 	//如果是空行就略过
-	// 	if len(strings.Trim(line.Text, "\r")) == 0 {
-	// 		continue
-	// 	}
-	// 	//利用通道将同步的代码改为异步
-	// 	//把读出来的一行日志包装成kafka里面的msg类型，丢到通道中
-	// 	msg := &sarama.ProducerMessage{}
-	// 	msg.Topic = "web_log"
-	// 	msg.Value = sarama.StringEncoder(line.Text)
-	// 	kafka.MsgChan(msg)
-	// }
-
 }
 
 func main() {
@@ -132,15 +73,15 @@ func main() {
 		return
 	}
 	//从etcd中拉取要收集日志的配置项
-	err = etcd.GetConf(configObj.EtcdConfig.CollectKey)
+	allConf, err := etcd.GetConf(configObj.EtcdConfig.CollectKey)
 	if err != nil {
 		logrus.Error("get conf conf from etcd failed, err:%v", err)
 		return
 	}
-	fmt.Println("allConf:", etcd.EtcdConf)
+	fmt.Println("allConf:", allConf)
 
 	// 2.根据配置中的日志路径使用tail去收集日志
-	err = tailfi.Init()
+	err = tailfi.Init(allConf)
 	if err != nil {
 		logrus.Error("init tailfile failed,err:%v", err)
 		return
@@ -149,10 +90,6 @@ func main() {
 
 	// 3.把日志通过sarama发送kafka
 	//TailObj -->log -->Client --> kafka
-	err = run()
-	if err != nil {
-		logrus.Error("run failed, err:%v", err)
-		return
+	for {
 	}
-
 }
