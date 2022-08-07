@@ -2,10 +2,19 @@ package main
 
 import "fmt"
 
+var b, a int
+
+func aaa() {
+
+	fmt.Println("jaja")
+
+}
+
 func main() {
-	var haha string
-	var bb string
-	haha = "你好"
-	bb = "啊"
-	fmt.Println([]string{haha + bb})
+	for i := 0; i <= 3; i++ {
+		go aaa()
+
+	}
+	for {
+	}
 }

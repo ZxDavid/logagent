@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"logagent/etcd"
 	"logagent/kafka"
 	tailfi "logagent/tailfile"
+	"strings"
 	"time"
 
 	"github.com/Shopify/sarama"
@@ -23,6 +25,7 @@ import (
 type Config struct {
 	KafkaConfig   `ini:"kafka"`
 	CollectConfig `ini:"collect"`
+	EtcdConfig    `ini:"etcd"`
 }
 
 type KafkaConfig struct {
@@ -35,25 +38,64 @@ type KafkaConfig struct {
 type CollectConfig struct {
 	LogfilePath string `ini:"logfile_path"`
 }
+type EtcdConfig struct {
+	Address    string `ini:"address"`
+	CollectKey string `ini:"collect_key"`
+}
 
 //真正的业务逻辑
 func run() (err error) {
 	//TailObj -->log -->Client --> kafka
-	for {
-		//循环读数据
-		line, ok := <-tailfi.TailObj.Lines
-		if !ok {
-			logrus.Error("tail file close reopen, filename:%s\n", tailfi.TailObj.Filename)
-			time.Sleep(time.Second)
-			continue
+	for key, ttt := range tailfi.TailObj {
+		go func() {
+			for {
+				//循环读数据
+				line, ok := <-ttt.Lines
+
+				if !ok {
+					logrus.Error("tail file close reopen, filename:%s\n", ttt.Filename)
+					time.Sleep(time.Second)
+					continue
+				}
+				//如果是空行就略过
+				if len(strings.Trim(line.Text, "\r")) == 0 {
+					continue
+				}
+				//利用通道将同步的代码改为异步
+				//把读出来的一行日志包装成kafka里面的msg类型，丢到通道中
+				msg := &sarama.ProducerMessage{}
+				msg.Topic = etcd.EtcdConf[key].Topic
+				msg.Value = sarama.StringEncoder(line.Text)
+				kafka.MsgChan(msg)
+				fmt.Printf("msg:%v\n", msg)
+			}
+		}()
+		if key == 1 {
+			time.Sleep(time.Second * 100)
 		}
-		//利用通道将同步的代码改为异步
-		//把读出来的一行日志包装成kafka里面的msg类型，丢到通道中
-		msg := &sarama.ProducerMessage{}
-		msg.Topic = "web_log"
-		msg.Value = sarama.StringEncoder(line.Text)
-		kafka.MsgChan <- msg
 	}
+
+	return
+	// for {
+	// 	//循环读数据
+	// 	line, ok := <-tailfi.TailObj.Lines
+
+	// 	if !ok {
+	// 		logrus.Error("tail file close reopen, filename:%s\n", tailfi.TailObj.Filename)
+	// 		time.Sleep(time.Second)
+	// 		continue
+	// 	}
+	// 	//如果是空行就略过
+	// 	if len(strings.Trim(line.Text, "\r")) == 0 {
+	// 		continue
+	// 	}
+	// 	//利用通道将同步的代码改为异步
+	// 	//把读出来的一行日志包装成kafka里面的msg类型，丢到通道中
+	// 	msg := &sarama.ProducerMessage{}
+	// 	msg.Topic = "web_log"
+	// 	msg.Value = sarama.StringEncoder(line.Text)
+	// 	kafka.MsgChan(msg)
+	// }
 
 }
 
@@ -83,8 +125,22 @@ func main() {
 	}
 	logrus.Info("init kafka success!")
 
+	//初始化etcd连接
+	err = etcd.Init([]string{configObj.EtcdConfig.Address})
+	if err != nil {
+		logrus.Error("init etcd failed, err:%v", err)
+		return
+	}
+	//从etcd中拉取要收集日志的配置项
+	err = etcd.GetConf(configObj.EtcdConfig.CollectKey)
+	if err != nil {
+		logrus.Error("get conf conf from etcd failed, err:%v", err)
+		return
+	}
+	fmt.Println("allConf:", etcd.EtcdConf)
+
 	// 2.根据配置中的日志路径使用tail去收集日志
-	err = tailfi.Init(configObj.CollectConfig.LogfilePath)
+	err = tailfi.Init()
 	if err != nil {
 		logrus.Error("init tailfile failed,err:%v", err)
 		return

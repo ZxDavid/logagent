@@ -9,7 +9,7 @@ import (
 
 var (
 	Client  sarama.SyncProducer
-	MsgChan chan *sarama.ProducerMessage
+	msgChan chan *sarama.ProducerMessage
 )
 
 //Init 是初始化全局的kafka client
@@ -27,7 +27,7 @@ func Init(address []string, chanSize int64) (err error) {
 		return
 	}
 	//初始化MsgCHAN
-	MsgChan = make(chan *sarama.ProducerMessage, chanSize)
+	msgChan = make(chan *sarama.ProducerMessage, chanSize)
 
 	//起一个后台的goroutine从msgchan中读数据
 	go sendMsg()
@@ -39,7 +39,7 @@ func Init(address []string, chanSize int64) (err error) {
 func sendMsg() {
 	for {
 		select {
-		case msg := <-MsgChan:
+		case msg := <-msgChan:
 			pid, offset, err := Client.SendMessage(msg)
 			if err != nil {
 				logrus.Warning("send msg failed, err:", err)
@@ -48,4 +48,9 @@ func sendMsg() {
 			logrus.Infof("send msg to kafka success,pid:%v offset:%v", pid, offset)
 		}
 	}
+}
+
+//定义一个函数向外暴漏msgChan
+func MsgChan(msg *sarama.ProducerMessage) {
+	msgChan <- msg
 }
